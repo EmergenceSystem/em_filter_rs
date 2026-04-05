@@ -1,5 +1,9 @@
 # em_filter
 
+[![Crates.io](https://img.shields.io/crates/v/em_filter.svg)](https://crates.io/crates/em_filter)
+[![Docs.rs](https://docs.rs/em_filter/badge.svg)](https://docs.rs/em_filter)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Rust SDK for building [Emergence](https://github.com/emergencesystem) network agents.
 
 `em_filter` lets any Rust process join the Emergence distributed discovery network
@@ -389,4 +393,4 @@ Log levels:
 
 ## License
 
-MIT
+[MIT](LICENSE)
