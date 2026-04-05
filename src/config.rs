@@ -124,23 +124,27 @@ fn read_conf_nodes() -> Option<Vec<DiscoNode>> {
 ///
 /// Unix:    `~/.config/emergence/emergence.conf`
 /// Windows: `%APPDATA%/emergence/emergence.conf`
+#[cfg(windows)]
 fn conf_path() -> Option<std::path::PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
-        return Some(
-            std::path::PathBuf::from(home)
-                .join(".config")
-                .join("emergence")
-                .join("emergence.conf"),
-        );
-    }
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        return Some(
-            std::path::PathBuf::from(appdata)
-                .join("emergence")
-                .join("emergence.conf"),
-        );
-    }
-    None
+    std::env::var("APPDATA").ok().map(|appdata| {
+        std::path::PathBuf::from(appdata)
+            .join("emergence")
+            .join("emergence.conf")
+    })
+}
+
+/// Platform-specific path to emergence.conf.
+///
+/// Unix:    `~/.config/emergence/emergence.conf`
+/// Windows: `%APPDATA%/emergence/emergence.conf`
+#[cfg(not(windows))]
+fn conf_path() -> Option<std::path::PathBuf> {
+    std::env::var("HOME").ok().map(|home| {
+        std::path::PathBuf::from(home)
+            .join(".config")
+            .join("emergence")
+            .join("emergence.conf")
+    })
 }
 
 /// Parse the `[em_disco] nodes = ...` entry from an INI-style config file.
