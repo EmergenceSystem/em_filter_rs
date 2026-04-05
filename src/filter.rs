@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::EmFilterError;
+
 /// The handler contract for an Emergence agent.
 ///
 /// Implement this trait on a struct that holds your agent's state
@@ -15,7 +17,7 @@ pub trait Filter: Send + 'static {
     /// `[{"type": "url", "properties": {"url": "...", "title": "..."}}]`
     ///
     /// Returning `Value::Null` or an empty array is valid (no results).
-    async fn handle(&mut self, body: &str) -> Value;
+    async fn handle(&mut self, body: &str) -> Result<Value, EmFilterError>;
 
     /// Capabilities announced to em_disco via `agent_hello`.
     ///
@@ -36,8 +38,8 @@ mod tests {
 
     #[async_trait]
     impl Filter for NoopFilter {
-        async fn handle(&mut self, _body: &str) -> Value {
-            json!([])
+        async fn handle(&mut self, _body: &str) -> Result<Value, EmFilterError> {
+            Ok(json!([]))
         }
     }
 
@@ -45,8 +47,8 @@ mod tests {
 
     #[async_trait]
     impl Filter for CustomCapsFilter {
-        async fn handle(&mut self, body: &str) -> Value {
-            json!({"echo": body})
+        async fn handle(&mut self, body: &str) -> Result<Value, EmFilterError> {
+            Ok(json!({"echo": body}))
         }
 
         fn capabilities(&self) -> Vec<String> {
@@ -57,12 +59,12 @@ mod tests {
     #[tokio::test]
     async fn test_handle_returns_value() {
         let mut f = NoopFilter;
-        let result = f.handle("test query").await;
+        let result = f.handle("test query").await.unwrap();
         assert_eq!(result, json!([]));
     }
 
-    #[tokio::test]
-    async fn test_default_capabilities() {
+    #[test]
+    fn test_default_capabilities() {
         let f = NoopFilter;
         let caps = f.capabilities();
         assert!(caps.contains(&"search".to_string()));
@@ -70,8 +72,8 @@ mod tests {
         assert_eq!(caps.len(), 2);
     }
 
-    #[tokio::test]
-    async fn test_custom_capabilities() {
+    #[test]
+    fn test_custom_capabilities() {
         let f = CustomCapsFilter;
         let caps = f.capabilities();
         assert!(caps.contains(&"web".to_string()));
@@ -81,7 +83,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_can_use_body() {
         let mut f = CustomCapsFilter;
-        let result = f.handle("erlang").await;
+        let result = f.handle("erlang").await.unwrap();
         assert_eq!(result["echo"], "erlang");
     }
 }

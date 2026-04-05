@@ -2,17 +2,17 @@
 //!
 //! # Quick start
 //!
-//! ```no_run
+//! ```ignore
 //! use em_filter::{Filter, FilterRunner, AgentConfig};
 //! use em_filter::async_trait;
 //! use serde_json::Value;
 //!
 //! struct MyFilter;
 //!
-//! #[em_filter::async_trait]
+//! #[async_trait]
 //! impl Filter for MyFilter {
-//!     async fn handle(&mut self, body: &str) -> Value {
-//!         serde_json::json!([{"type": "url", "properties": {"url": "https://example.com"}}])
+//!     async fn handle(&mut self, body: &str) -> Result<Value, em_filter::EmFilterError> {
+//!         Ok(serde_json::json!([{"type": "url", "properties": {"url": "https://example.com"}}]))
 //!     }
 //! }
 //!

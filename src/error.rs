@@ -18,6 +18,6 @@ pub enum EmFilterError {
     Html(String),
 
     /// I/O error (e.g. reading emergence.conf).
-    #[error("IO error: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
