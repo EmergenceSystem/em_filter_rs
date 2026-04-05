@@ -99,7 +99,13 @@ impl<F: Filter> Connection<F> {
                     };
 
                     if v["action"] == "query" {
-                        let id = v["id"].as_str().unwrap_or("").to_string();
+                        let id = match v["id"].as_str() {
+                            Some(s) => s.to_string(),
+                            None => {
+                                tracing::warn!(agent = %self.name, "Query frame missing 'id', skipping");
+                                continue;
+                            }
+                        };
                         let body = v["body"].as_str().unwrap_or("").to_string();
 
                         tracing::info!(
@@ -145,7 +151,9 @@ impl<F: Filter> Connection<F> {
                     return Ok(());
                 }
                 // Ping / Pong / Binary frames are ignored.
-                _ => {}
+                _ => {
+                    tracing::debug!(agent = %self.name, "Ignoring non-text WebSocket frame");
+                }
             }
         }
 
@@ -155,6 +163,9 @@ impl<F: Filter> Connection<F> {
     /// Build the WebSocket URL for this node.
     ///
     /// Appends `?token=<jwt>` when a token is configured.
+    ///
+    /// JWT tokens use base64url encoding (RFC 7515) and contain only URL-safe
+    /// characters (`[A-Za-z0-9._-]`). No percent-encoding is applied.
     fn ws_url(&self) -> String {
         let scheme = if self.node.tls { "wss" } else { "ws" };
         match &self.jwt_token {
@@ -167,9 +178,10 @@ impl<F: Filter> Connection<F> {
     }
 }
 
-/// Reconnect delay in milliseconds.
+/// Returns the reconnect delay, sampled once per `run` invocation.
 ///
-/// Reads `EM_FILTER_RECONNECT_MS` from the environment; defaults to 5000.
+/// Reads `EM_FILTER_RECONNECT_MS` from the environment at call time; defaults to 5000 ms.
+/// The flat (non-exponential) delay matches the Erlang em_filter_server behaviour.
 fn reconnect_delay() -> Duration {
     let ms: u64 = std::env::var("EM_FILTER_RECONNECT_MS")
         .ok()
@@ -181,11 +193,8 @@ fn reconnect_delay() -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Filter;
     use async_trait::async_trait;
     use serde_json::{json, Value};
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
     use tokio_tungstenite::accept_async;
 
     /// A simple echo filter used in tests.
