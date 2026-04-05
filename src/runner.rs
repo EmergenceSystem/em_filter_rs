@@ -40,7 +40,7 @@ use crate::connection::Connection;
 pub struct FilterRunner<F: Filter> {
     /// Agent name announced in the `register` frame.
     name: String,
-    /// Shared filter instance — wrapped in Arc<Mutex> so all node tasks can use it.
+    /// Shared filter instance — wrapped in `Arc<Mutex<F>>` so all node tasks can use it.
     filter: Arc<Mutex<F>>,
     /// Agent configuration (JWT token, disco nodes).
     config: AgentConfig,

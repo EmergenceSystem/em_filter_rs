@@ -41,9 +41,6 @@ pub use html::{
     decode_html_entities, should_skip_link,
 };
 
-// These modules will be added in subsequent tasks.
-// Declare them here so lib.rs is the single source of public API.
-// (Commented out until implemented)
 mod connection;
 mod runner;
 pub use runner::FilterRunner;

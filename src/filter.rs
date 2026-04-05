@@ -6,7 +6,7 @@ use crate::EmFilterError;
 /// The handler contract for an Emergence agent.
 ///
 /// Implement this trait on a struct that holds your agent's state
-/// (HTTP clients, caches, counters, etc.). The library calls [`handle`]
+/// (HTTP clients, caches, counters, etc.). The library calls [`Filter::handle`]
 /// for every query received from em_disco.
 #[async_trait]
 pub trait Filter: Send + 'static {
