@@ -88,6 +88,97 @@ variables or `AgentConfig` — see [Configuration](#configuration).
 
 ---
 
+## Try the built-in example
+
+The crate ships an `echo_filter` example — the fastest way to verify that your
+em_disco broker is reachable and the handshake works:
+
+```bash
+# Clone / enter the crate directory, then:
+cargo run --example echo_filter
+```
+
+Expected output once connected:
+
+```
+INFO em_filter: Starting em_filter agent agent="echo_filter" nodes=1
+INFO em_filter: Connecting to em_disco agent="echo_filter" url="ws://localhost:8080/ws"
+INFO em_filter: Registered on em_disco — entering message loop agent="echo_filter"
+```
+
+With a custom broker:
+
+```bash
+EM_DISCO_HOST=disco.example.com \
+EM_DISCO_PORT=443 \
+EM_FILTER_JWT_TOKEN=eyJ... \
+cargo run --example echo_filter
+```
+
+Test it from the Erlang shell (with em_disco running):
+
+```erlang
+em_disco:query(<<"hello world">>).
+%% → [#{<<"type">> => <<"url">>,
+%%     <<"properties">> => #{<<"title">> => <<"Echo: hello world">>, ...}}]
+```
+
+---
+
+## Building your own filter
+
+Copy the echo example as your starting point:
+
+```
+filters/
+└── my_filter/
+    ├── Cargo.toml
+    └── src/
+        └── main.rs
+```
+
+**`Cargo.toml`:**
+```toml
+[package]
+name    = "my_filter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+em_filter           = "0.1"
+serde_json          = "1"
+tokio               = { version = "1", features = ["full"] }
+tracing-subscriber  = "0.3"
+```
+
+**`src/main.rs`:**
+```rust
+use em_filter::{async_trait, AgentConfig, EmFilterError, Filter, FilterRunner};
+use serde_json::{json, Value};
+
+struct MyFilter;
+
+#[async_trait]
+impl Filter for MyFilter {
+    async fn handle(&mut self, body: &str) -> Result<Value, EmFilterError> {
+        tracing::info!(query = %body, "handling query");
+        // … your logic here …
+        Ok(json!([]))
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
+    FilterRunner::new("my_filter", MyFilter, AgentConfig::default())
+        .run()
+        .await
+        .unwrap();
+}
+```
+
+---
+
 ## The Filter trait
 
 Implement `Filter` on any struct that holds your agent's state:

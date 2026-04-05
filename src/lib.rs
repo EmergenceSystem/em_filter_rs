@@ -84,6 +84,13 @@
 //! By default the agent connects to `localhost:8080`. See [`AgentConfig`] for
 //! environment variables and `emergence.conf` configuration.
 //!
+//! A runnable `echo_filter` example is included in the crate. It connects to
+//! em_disco and echoes every query back — useful for verifying your broker setup:
+//!
+//! ```bash
+//! cargo run --example echo_filter
+//! ```
+//!
 //! ---
 //!
 //! ## Configuration
