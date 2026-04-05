@@ -5,33 +5,72 @@ use crate::connection::Connection;
 
 /// Runs a filter agent by connecting to all configured em_disco nodes.
 ///
-/// Each node gets its own tokio task with an independent WebSocket connection.
-/// All tasks share the same filter instance via `Arc<Mutex<F>>`, so handler
-/// calls are serialized — one query is processed at a time regardless of how
-/// many nodes are connected. This is safe because filters are typically I/O-bound.
+/// `FilterRunner` is the main entry point for the library. It:
 ///
-/// `run` does not return unless all connection tasks panic (which should not happen
-/// in normal operation).
+/// 1. Resolves disco nodes from [`AgentConfig`] (explicit list, env vars,
+///    `emergence.conf`, or the built-in default `localhost:8080`).
+/// 2. Wraps the [`Filter`] implementation in `Arc<Mutex<F>>` so it can be
+///    shared safely across tasks.
+/// 3. Spawns one [`tokio::task`] per node; each task maintains a persistent
+///    WebSocket connection and reconnects automatically on any error.
 ///
-/// # Example
+/// All handler calls are serialized through the single `Arc<Mutex<F>>` — one
+/// query is processed at a time regardless of how many nodes are connected.
+/// This mirrors the single-process model of the Erlang em_filter library and
+/// is safe for the typical I/O-bound filter.
+///
+/// `run` does not return in normal operation. It only returns after all
+/// connection tasks have exited (which should not happen — each task loops
+/// forever, reconnecting on errors).
+///
+/// # Example — minimal agent
 ///
 /// ```no_run
-/// use em_filter::{Filter, FilterRunner, AgentConfig, async_trait};
-/// use em_filter::EmFilterError;
-/// use serde_json::Value;
+/// use em_filter::{async_trait, AgentConfig, EmFilterError, Filter, FilterRunner};
+/// use serde_json::{json, Value};
 ///
 /// struct MyFilter;
 ///
 /// #[async_trait]
 /// impl Filter for MyFilter {
 ///     async fn handle(&mut self, body: &str) -> Result<Value, EmFilterError> {
-///         Ok(serde_json::json!([]))
+///         Ok(json!([{
+///             "type": "url",
+///             "properties": { "url": "https://example.com", "title": body }
+///         }]))
 ///     }
 /// }
 ///
 /// #[tokio::main]
 /// async fn main() {
+///     tracing_subscriber::fmt::init();
 ///     FilterRunner::new("my_filter", MyFilter, AgentConfig::default())
+///         .run()
+///         .await
+///         .unwrap();
+/// }
+/// ```
+///
+/// # Example — connecting to a specific node with a JWT
+///
+/// ```no_run
+/// use em_filter::{AgentConfig, DiscoNode, Filter, FilterRunner, async_trait, EmFilterError};
+/// use serde_json::Value;
+///
+/// struct MyFilter;
+/// # #[async_trait] impl Filter for MyFilter {
+/// #     async fn handle(&mut self, _: &str) -> Result<Value, EmFilterError> { Ok(serde_json::json!([])) }
+/// # }
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let config = AgentConfig {
+///         jwt_token: Some("eyJ...".into()),
+///         disco_nodes: vec![
+///             DiscoNode { host: "disco.example.com".into(), port: 443, tls: true },
+///         ],
+///     };
+///     FilterRunner::new("my_filter", MyFilter, config)
 ///         .run()
 ///         .await
 ///         .unwrap();
@@ -49,8 +88,8 @@ pub struct FilterRunner<F: Filter> {
 impl<F: Filter> FilterRunner<F> {
     /// Create a new runner.
     ///
-    /// `name` is the agent name announced during the em_disco handshake.
-    /// It must match the `sub` claim of the JWT if authentication is enabled.
+    /// `name` is the agent name sent in the `register` handshake frame. It must
+    /// match the `sub` claim of the JWT token when em_disco authentication is enabled.
     pub fn new(name: impl Into<String>, filter: F, config: AgentConfig) -> Self {
         Self {
             name: name.into(),
@@ -59,10 +98,14 @@ impl<F: Filter> FilterRunner<F> {
         }
     }
 
-    /// Start the agent. Spawns one tokio task per disco node and runs indefinitely.
+    /// Start the agent and run indefinitely.
     ///
-    /// Each task reconnects automatically on connection loss — identical lifecycle
-    /// to the Erlang `em_filter_server` gen_server.
+    /// Spawns one tokio task per resolved disco node. Each task runs the
+    /// connect → register → agent_hello → message loop → reconnect lifecycle
+    /// identical to the Erlang `em_filter_server` gen_server.
+    ///
+    /// Returns `Ok(())` only after all tasks have exited (unexpected in normal
+    /// operation). Panics in individual tasks are logged and do not propagate.
     pub async fn run(self) -> Result<(), EmFilterError> {
         let nodes = self.config.resolve_nodes()?;
         let jwt_token = self.config.resolve_jwt();
