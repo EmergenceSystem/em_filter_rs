@@ -5,8 +5,8 @@ use crate::EmFilterError;
 
 /// Removes all `<script>...</script>` blocks from an HTML string.
 ///
-/// Returns `Err(EmFilterError::Html)` if the regex cannot be compiled
-/// (this should never happen in practice — the pattern is a compile-time constant).
+/// Always succeeds — the regex is a compile-time constant. The `Result` return
+/// type is kept for API consistency with callers that handle HTML errors uniformly.
 pub fn strip_scripts(html: &str) -> Result<String, EmFilterError> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
@@ -88,7 +88,7 @@ fn decode_numeric_entities(text: &str) -> String {
 /// Decodes hexadecimal HTML entities: `&#x41;` → `A`.
 fn decode_hex_entities(text: &str) -> String {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"(?i)&#x([0-9A-Fa-f]+);").unwrap());
+    let re = RE.get_or_init(|| Regex::new(r"&#[xX]([0-9A-Fa-f]+);").unwrap());
     re.replace_all(text, |caps: &regex::Captures| {
         let n = u32::from_str_radix(&caps[1], 16).unwrap_or(0);
         char::from_u32(n).map(|c| c.to_string()).unwrap_or_default()
