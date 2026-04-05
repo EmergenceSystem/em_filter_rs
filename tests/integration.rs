@@ -73,12 +73,10 @@ async fn test_filterrunner_connects_and_handles_query() {
         jwt_token: None,
     };
 
-    // Run with a timeout — the runner never returns on its own
-    let _ = tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::spawn(FilterRunner::new("integration_agent", filter, config).run()),
-    )
-    .await;
+    // Spawn the runner and abort it after the timeout to prevent background task leakage.
+    let runner_handle = tokio::spawn(FilterRunner::new("integration_agent", filter, config).run());
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    runner_handle.abort();
 
     // Verify the result received by the mock server
     let result = tokio::time::timeout(Duration::from_secs(3), result_rx)
@@ -142,11 +140,9 @@ async fn test_filterrunner_shared_state_across_queries() {
         jwt_token: None,
     };
 
-    let _ = tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::spawn(FilterRunner::new("shared_state_agent", filter, config).run()),
-    )
-    .await;
+    let runner_handle = tokio::spawn(FilterRunner::new("shared_state_agent", filter, config).run());
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    runner_handle.abort();
 
     let r1 = tokio::time::timeout(Duration::from_secs(3), rx1).await.unwrap().unwrap();
     let r2 = tokio::time::timeout(Duration::from_secs(3), rx2).await.unwrap().unwrap();

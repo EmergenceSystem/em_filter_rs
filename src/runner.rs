@@ -89,7 +89,9 @@ impl<F: Filter> FilterRunner<F> {
 
         // Wait for all tasks. In normal operation these run forever.
         for handle in handles {
-            let _ = handle.await;
+            if let Err(e) = handle.await {
+                tracing::error!(agent = %self.name, error = ?e, "Connection task panicked");
+            }
         }
 
         Ok(())

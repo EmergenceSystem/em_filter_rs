@@ -10,6 +10,9 @@ pub enum EmFilterError {
     Json(#[from] serde_json::Error),
 
     /// No disco nodes were configured or could be resolved.
+    ///
+    /// Reserved for future use — not currently returned by the library.
+    /// Automatic resolution always falls back to `localhost:8080`.
     #[error("No disco nodes configured or resolved")]
     NoNodes,
 
