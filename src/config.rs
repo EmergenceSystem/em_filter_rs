@@ -34,9 +34,11 @@ pub struct AgentConfig {
 impl AgentConfig {
     /// Resolve the list of disco nodes to connect to.
     ///
-    /// Returns `Err(EmFilterError::NoNodes)` only when an explicit empty list
-    /// is provided via `disco_nodes` — never for the automatic resolution path
-    /// (which always falls back to `localhost:8080`).
+    /// Always returns `Ok`. The fallback chain ensures a result is always
+    /// produced — even with no configuration, it falls back to `localhost:8080`.
+    ///
+    /// Use `AgentConfig { disco_nodes, .. }` with a non-empty list to override
+    /// automatic resolution.
     pub(crate) fn resolve_nodes(&self) -> Result<Vec<DiscoNode>, crate::EmFilterError> {
         if !self.disco_nodes.is_empty() {
             return Ok(self.disco_nodes.clone());
@@ -46,6 +48,7 @@ impl AgentConfig {
         let port_env = std::env::var("EM_DISCO_PORT").ok();
         match (host_env, port_env) {
             (Some(host), Some(port_str)) => {
+                // Invalid port values (non-numeric) silently fall back to 8080.
                 let port: u16 = port_str.parse().unwrap_or(8080);
                 let tls = infer_tls(&host, port);
                 return Ok(vec![DiscoNode { host, port, tls }]);
@@ -55,6 +58,7 @@ impl AgentConfig {
                 return Ok(vec![DiscoNode { host, port, tls }]);
             }
             (None, Some(port_str)) => {
+                // Invalid port values (non-numeric) silently fall back to 8080.
                 let port: u16 = port_str.parse().unwrap_or(8080);
                 return Ok(vec![DiscoNode {
                     host: "localhost".into(),
@@ -95,7 +99,7 @@ impl AgentConfig {
 /// Remote host on port 443 → TLS.
 /// Remote host on any other port → TCP.
 fn infer_tls(host: &str, port: u16) -> bool {
-    if host == "localhost" || host == "127.0.0.1" {
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
         return false;
     }
     port == 443
@@ -106,7 +110,7 @@ fn infer_tls(host: &str, port: u16) -> bool {
 /// localhost / 127.0.0.1 → (8080, false).
 /// Any other host → (443, true).
 fn default_port_tls(host: &str) -> (u16, bool) {
-    if host == "localhost" || host == "127.0.0.1" {
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
         (8080, false)
     } else {
         (443, true)
@@ -164,6 +168,7 @@ fn parse_conf(content: &str) -> Option<Vec<DiscoNode>> {
         if section == "em_disco" {
             if let Some((key, val)) = line.split_once('=') {
                 if key.trim() == "nodes" {
+                    // Last `nodes = ...` line under [em_disco] wins; earlier ones are silently overwritten.
                     nodes_str = Some(val.trim().to_string());
                 }
             }
@@ -173,7 +178,10 @@ fn parse_conf(content: &str) -> Option<Vec<DiscoNode>> {
     nodes_str.map(|s| parse_nodes(&s))
 }
 
-/// Parse a comma-separated node list: `localhost:8080, example.com`.
+/// Parse a comma-separated node list: `localhost:8080, example.com, [::1]:9000`.
+///
+/// IPv6 addresses must be in bracket notation when a port is specified: `[::1]:8080`.
+/// A bare host with no port uses the default port for that host type.
 fn parse_nodes(s: &str) -> Vec<DiscoNode> {
     s.split(',')
         .filter_map(|entry| {
@@ -181,8 +189,9 @@ fn parse_nodes(s: &str) -> Vec<DiscoNode> {
             if entry.is_empty() {
                 return None;
             }
-            if let Some((host, port_str)) = entry.rsplit_once(':') {
-                let host = host.trim().to_string();
+            if let Some((host_raw, port_str)) = entry.rsplit_once(':') {
+                // Strip brackets from IPv6 addresses: [::1] → ::1
+                let host = host_raw.trim().trim_matches(|c| c == '[' || c == ']').to_string();
                 let port: u16 = port_str.trim().parse().ok()?;
                 let tls = infer_tls(&host, port);
                 Some(DiscoNode { host, port, tls })
@@ -198,8 +207,10 @@ fn parse_nodes(s: &str) -> Vec<DiscoNode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_default_resolves_to_localhost() {
         std::env::remove_var("EM_DISCO_HOST");
         std::env::remove_var("EM_DISCO_PORT");
@@ -297,9 +308,40 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_jwt_none_when_absent() {
         std::env::remove_var("EM_FILTER_JWT_TOKEN");
         let config = AgentConfig::default();
         assert_eq!(config.resolve_jwt(), None);
+    }
+
+    #[test]
+    fn test_parse_conf_last_nodes_wins() {
+        let content = "[em_disco]\nnodes = localhost:8080\nnodes = localhost:9090\n";
+        let nodes = parse_conf(content).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].port, 9090);
+    }
+
+    #[test]
+    fn test_ipv6_loopback_infer_tls() {
+        assert!(!infer_tls("::1", 443));
+        assert!(!infer_tls("::1", 8080));
+    }
+
+    #[test]
+    fn test_ipv6_loopback_default_port_tls() {
+        let (port, tls) = default_port_tls("::1");
+        assert_eq!(port, 8080);
+        assert!(!tls);
+    }
+
+    #[test]
+    fn test_parse_nodes_ipv6_bracket_notation() {
+        let nodes = parse_nodes("[::1]:9000");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].host, "::1");
+        assert_eq!(nodes[0].port, 9000);
+        assert!(!nodes[0].tls);
     }
 }

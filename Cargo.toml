@@ -18,3 +18,4 @@ futures-util = "0.3"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
+serial_test = "1"
