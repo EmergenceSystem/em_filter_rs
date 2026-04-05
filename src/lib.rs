@@ -45,5 +45,5 @@ pub use html::{
 // Declare them here so lib.rs is the single source of public API.
 // (Commented out until implemented)
 mod connection;
-// mod runner;
-// pub use runner::FilterRunner;
+mod runner;
+pub use runner::FilterRunner;
