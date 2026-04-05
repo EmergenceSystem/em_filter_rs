@@ -16,15 +16,15 @@ protocol, same configuration contract, idiomatic Rust API.
 
 ```
  ┌─────────────┐    WebSocket     ┌───────────────┐    WebSocket     ┌─────────────┐
- │  em_disco   │ ◄─────────────── │  FilterRunner  │ ─────────────── │  em_disco   │
- │  (broker)   │  query / result  │  (your agent)  │  (multi-node)   │  (replica)  │
+ │  em_disco   │ ◄─────────────── │ FilterRunner  │ ───────────────  │  em_disco   │
+ │  (broker)   │  query / result  │ (your agent)  │  (multi-node)    │  (replica)  │
  └─────────────┘                  └───────────────┘                  └─────────────┘
                                          │
                                   Arc<Mutex<F>>
                                          │
                                   ┌──────┴──────┐
-                                  │ your Filter  │
-                                  │    impl      │
+                                  │ your Filter │
+                                  │    impl     │
                                   └─────────────┘
 ```
 
