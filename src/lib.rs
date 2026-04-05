@@ -31,16 +31,19 @@ pub use async_trait::async_trait;
 mod error;
 mod filter;
 mod config;
+mod html;
 
 pub use error::EmFilterError;
 pub use filter::Filter;
 pub use config::{AgentConfig, DiscoNode};
+pub use html::{
+    strip_scripts, get_text, extract_elements, extract_attribute,
+    decode_html_entities, should_skip_link,
+};
 
 // These modules will be added in subsequent tasks.
 // Declare them here so lib.rs is the single source of public API.
 // (Commented out until implemented)
-// mod html;
 // mod connection;
 // mod runner;
-// pub use html::{strip_scripts, get_text, extract_elements, extract_attribute, decode_html_entities, should_skip_link};
 // pub use runner::FilterRunner;
