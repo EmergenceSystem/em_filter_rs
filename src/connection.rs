@@ -65,7 +65,7 @@ impl<F: Filter> Connection<F> {
         // Step 1: announce agent name.
         write
             .send(Message::Text(
-                json!({"action": "register", "name": &self.name}).to_string(),
+                json!({"action": "register", "name": &self.name}).to_string().into(),
             ))
             .await?;
 
@@ -74,7 +74,7 @@ impl<F: Filter> Connection<F> {
         let caps = self.filter.lock().await.capabilities();
         write
             .send(Message::Text(
-                json!({"action": "agent_hello", "capabilities": caps}).to_string(),
+                json!({"action": "agent_hello", "capabilities": caps}).to_string().into(),
             ))
             .await?;
 
@@ -139,7 +139,8 @@ impl<F: Filter> Connection<F> {
                                     "id":     id,
                                     "data":   result
                                 })
-                                .to_string(),
+                                .to_string()
+                                .into(),
                             ))
                             .await?;
                     }
@@ -244,7 +245,8 @@ mod tests {
             write
                 .send(Message::Text(
                     json!({"action": "query", "id": "test-q1", "body": query_body})
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 ))
                 .await
                 .unwrap();

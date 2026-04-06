@@ -50,7 +50,7 @@ async fn test_filterrunner_connects_and_handles_query() {
         // Send query
         write
             .send(Message::Text(
-                json!({"action": "query", "id": "int-1", "body": "hello world"}).to_string(),
+                json!({"action": "query", "id": "int-1", "body": "hello world"}).to_string().into(),
             ))
             .await
             .unwrap();
@@ -111,7 +111,7 @@ async fn test_filterrunner_shared_state_across_queries() {
         // Query 1
         write
             .send(Message::Text(
-                json!({"action": "query", "id": "q1", "body": "first"}).to_string(),
+                json!({"action": "query", "id": "q1", "body": "first"}).to_string().into(),
             ))
             .await
             .unwrap();
@@ -121,7 +121,7 @@ async fn test_filterrunner_shared_state_across_queries() {
         // Query 2
         write
             .send(Message::Text(
-                json!({"action": "query", "id": "q2", "body": "second"}).to_string(),
+                json!({"action": "query", "id": "q2", "body": "second"}).to_string().into(),
             ))
             .await
             .unwrap();
