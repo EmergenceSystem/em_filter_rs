@@ -1,6 +1,6 @@
 [package]
 name         = "em_filter"
-version      = "0.2.0"
+version      = "0.2.1"
 edition      = "2021"
 description  = "Rust SDK for building Emergence network agents — connect to em_disco, handle queries, return results."
 license-file = "LICENSE"

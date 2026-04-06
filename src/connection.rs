@@ -106,7 +106,7 @@ impl<F: Filter> Connection<F> {
                                 continue;
                             }
                         };
-                        let body = v["body"].as_str().unwrap_or("").to_string();
+                        let body = v["body"].as_str().unwrap_or("").trim().to_string();
 
                         tracing::info!(
                             agent    = %self.name,
