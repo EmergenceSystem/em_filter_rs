@@ -168,6 +168,7 @@ mod config;
 mod html;
 mod connection;
 mod runner;
+pub mod crypto;
 
 pub use error::EmFilterError;
 pub use filter::Filter;
