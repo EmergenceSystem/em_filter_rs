@@ -35,6 +35,12 @@ pub enum EmFilterError {
     #[error("No disco nodes configured or resolved")]
     NoNodes,
 
+    /// A transport-level protocol error: an invalid `EM_FILTER_MODE`, a
+    /// rejected or malformed relay handshake, or a relay session that closed
+    /// before completing it.
+    #[error("Protocol error: {0}")]
+    Protocol(String),
+
     /// An error during HTML processing.
     ///
     /// Returned by [`crate::strip_scripts`] when regex compilation fails (never
