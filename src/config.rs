@@ -86,6 +86,11 @@ impl AgentConfig {
     ///
     /// Returns the token from this struct if set, otherwise checks the
     /// `EM_FILTER_JWT_TOKEN` environment variable.
+    ///
+    /// Not currently consumed by the mesh transports (Model A/B authenticate
+    /// via the ed25519 identity, not a shared token) — kept for API parity
+    /// with the other SDKs, which likewise carry an unused `jwt_token` field.
+    #[allow(dead_code)]
     pub(crate) fn resolve_jwt(&self) -> Option<String> {
         self.jwt_token
             .clone()
@@ -212,8 +217,10 @@ mod tests {
     #[test]
     #[serial]
     fn test_default_resolves_to_localhost() {
-        std::env::remove_var("EM_DISCO_HOST");
-        std::env::remove_var("EM_DISCO_PORT");
+        unsafe {
+            std::env::remove_var("EM_DISCO_HOST");
+            std::env::remove_var("EM_DISCO_PORT");
+        }
         let config = AgentConfig::default();
         let nodes = config.resolve_nodes().unwrap();
         assert_eq!(nodes.len(), 1);
@@ -310,7 +317,9 @@ mod tests {
     #[test]
     #[serial]
     fn test_resolve_jwt_none_when_absent() {
-        std::env::remove_var("EM_FILTER_JWT_TOKEN");
+        unsafe {
+            std::env::remove_var("EM_FILTER_JWT_TOKEN");
+        }
         let config = AgentConfig::default();
         assert_eq!(config.resolve_jwt(), None);
     }
