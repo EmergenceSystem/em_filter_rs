@@ -1,53 +1,35 @@
 //! # echo_filter — minimal working example
 //!
-//! Connects to em_disco as an agent named `echo_filter`, announces the
+//! Joins the Emergence mesh as an agent named `echo_filter`, announcing the
 //! `["search", "query", "echo"]` capabilities, and echoes every query it
 //! receives back as a single URL embryo.
 //!
 //! Use this as a starting point when building your own filter, or to verify
-//! that your em_disco broker is reachable and the handshake works.
+//! that your disco node is reachable and the handshake works.
 //!
-//! ## Run
-//!
-//! ```bash
-//! cargo run --example echo_filter
-//! ```
-//!
-//! With a custom broker address:
+//! ## Run (Model B — relay, default)
 //!
 //! ```bash
-//! EM_DISCO_HOST=disco.example.com EM_DISCO_PORT=443 \
-//! EM_FILTER_JWT_TOKEN=eyJ... \
+//! EM_FILTER_MODE=relay EM_DISCO_HOST=disco.roques.me cargo run --example echo_filter
+//! ```
+//!
+//! ## Run (Model A — direct)
+//!
+//! ```bash
+//! EM_FILTER_MODE=direct EM_DISCO_HOST=disco.roques.me EM_FILTER_QUERY_PORT=9600 \
 //! cargo run --example echo_filter
-//! ```
-//!
-//! ## Test it from the Erlang shell
-//!
-//! Once the agent is connected you should see:
-//! ```text
-//! INFO echo_filter: Registered on em_disco — entering message loop
-//! ```
-//!
-//! Then from `em_disco`:
-//! ```erlang
-//! em_disco:query(<<"hello world">>).
-//! %% → [#{<<"type">> => <<"url">>,
-//! %%     <<"properties">> => #{<<"title">> => <<"Echo: hello world">>, ...}}]
-//! ```
-//!
-//! The agent logs each query it receives:
-//! ```text
-//! INFO echo_filter: Received query query="hello world"
 //! ```
 //!
 //! ## Environment variables
 //!
 //! | Variable | Default | Description |
 //! |----------|---------|-------------|
-//! | `EM_DISCO_HOST` | `localhost` | Broker hostname |
-//! | `EM_DISCO_PORT` | `8080` | Broker port |
-//! | `EM_FILTER_JWT_TOKEN` | — | JWT for authenticated brokers |
-//! | `EM_FILTER_RECONNECT_MS` | `5000` | Reconnect delay (ms) |
+//! | `EM_FILTER_MODE` | `relay` | `relay` \| `direct` \| `both` |
+//! | `EM_DISCO_HOST` | `localhost` | Disco node hostname |
+//! | `EM_DISCO_PORT` | — | Disco node port (defaults to 443/TLS for a remote host) |
+//! | `EM_FILTER_KEY_DIR` | `./empop_key_echo_filter/` | ed25519 key file directory |
+//! | `EM_FILTER_RECONNECT_MS` | `5000` | Relay reconnect delay (ms) |
+//! | `EM_FILTER_QUERY_PORT` | `9600` | Model A HTTP listen port |
 
 use em_filter::{async_trait, AgentConfig, EmFilterError, Filter, FilterRunner};
 use serde_json::{json, Value};

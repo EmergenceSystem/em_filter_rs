@@ -7,34 +7,41 @@
 Rust SDK for building [Emergence](https://github.com/emergencesystem) network agents.
 
 `em_filter` lets any Rust process join the Emergence distributed discovery network
-as a **filter agent** — a service that receives search queries from the `em_disco`
-broker, processes them (web search, DNS lookup, LLM call, database query, …), and
-returns structured results.
+as a **filter agent** — a service that receives search queries from an `em_disco`
+node, processes them (web search, DNS lookup, LLM call, database query, …), and
+returns structured, ed25519-signed results.
 
-This crate is the Rust equivalent of the Erlang `em_filter` library: same WebSocket
-protocol, same configuration contract, idiomatic Rust API.
+This crate joins the **signed Emergence mesh**: every agent has an ed25519 identity,
+and every result it returns is signed. It speaks the same protocol as the other
+Emergence SDKs (Python, Go, …) — see [`em_filter_py`](https://github.com/EmergenceSystem/em_filter_py)
+for the canonical reference implementation.
 
 ---
 
 ## How it works
 
 ```
- ┌─────────────┐    WebSocket     ┌───────────────┐    WebSocket     ┌─────────────┐
- │  em_disco   │ ◄─────────────── │ FilterRunner  │ ───────────────  │  em_disco   │
- │  (broker)   │  query / result  │ (your agent)  │  (multi-node)    │  (replica)  │
- └─────────────┘                  └───────────────┘                  └─────────────┘
-                                         │
-                                  Arc<Mutex<F>>
-                                         │
-                                  ┌──────┴──────┐
-                                  │ your Filter │
-                                  │    impl     │
-                                  └─────────────┘
+                     Model B — relay (default, NAT-friendly)
+ ┌───────────────┐   outbound WSS     ┌─────────────┐
+ │ FilterRunner  │ ─────────────────► │  em_disco   │
+ │ (your agent)  │ ◄──── query ─────  │             │
+ │               │ ──── result ─────► │             │
+ └───────────────┘   (signed)         └─────────────┘
+
+                     Model A — direct
+ ┌───────────────┐  POST /agent/query ┌─────────────┐
+ │ AgentServer   │ ◄───────────────── │  em_disco   │
+ │ (your agent)  │ ── signed result ► │             │
+ │               │ ── POST /pop/gossip (self-payload, periodic) ►
+ └───────────────┘                    └─────────────┘
 ```
 
-1. `FilterRunner` resolves disco nodes and spawns one tokio task per node.
-2. Each task maintains a persistent WebSocket connection with automatic reconnection.
-3. On a `query` frame, the task calls your `Filter::handle` and sends back a `result` frame.
+1. `FilterRunner` loads (or creates) the agent's ed25519 identity and resolves disco nodes.
+2. `EM_FILTER_MODE` selects the transport: `relay` (default) opens an outbound WebSocket to
+   `wss://<disco>/ws/filter`; `direct` runs a local HTTP server and gossips it to disco seeds;
+   `both` runs them concurrently.
+3. On a query, the transport calls your `Filter::handle`, signs the result with the agent's
+   ed25519 key, and sends it back — `{results, signer_id, signature}`.
 
 ---
 
@@ -87,44 +94,26 @@ async fn main() {
 }
 ```
 
-By default the agent connects to `localhost:8080`. Override via environment
-variables or `AgentConfig` — see [Configuration](#configuration).
+By default the agent runs in `relay` mode against `localhost:8080`. Override via
+environment variables or `AgentConfig` — see [Configuration](#configuration).
 
 ---
 
 ## Try the built-in example
 
 The crate ships an `echo_filter` example — the fastest way to verify that your
-em_disco broker is reachable and the handshake works:
+disco node is reachable and the handshake works:
 
 ```bash
-# Clone / enter the crate directory, then:
-cargo run --example echo_filter
+EM_FILTER_MODE=relay EM_DISCO_HOST=disco.roques.me cargo run --example echo_filter
 ```
 
 Expected output once connected:
 
 ```
-INFO em_filter: Starting em_filter agent agent="echo_filter" nodes=1
-INFO em_filter: Connecting to em_disco agent="echo_filter" url="ws://localhost:8080/ws"
-INFO em_filter: Registered on em_disco — entering message loop agent="echo_filter"
-```
-
-With a custom broker:
-
-```bash
-EM_DISCO_HOST=disco.example.com \
-EM_DISCO_PORT=443 \
-EM_FILTER_JWT_TOKEN=eyJ... \
-cargo run --example echo_filter
-```
-
-Test it from the Erlang shell (with em_disco running):
-
-```erlang
-em_disco:query(<<"hello world">>).
-%% → [#{<<"type">> => <<"url">>,
-%%     <<"properties">> => #{<<"title">> => <<"Echo: hello world">>, ...}}]
+INFO em_filter: Starting em_filter agent agent="echo_filter" mode="relay" nodes=1
+INFO em_filter: connecting to relay agent="echo_filter" url="wss://disco.roques.me:443/ws/filter"
+INFO em_filter: relay hello_ok — entering query loop agent="echo_filter"
 ```
 
 ---
@@ -241,10 +230,14 @@ Default: `["search", "query"]`. Override to add domain-specific capabilities.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EM_DISCO_HOST` | — | Disco broker hostname |
-| `EM_DISCO_PORT` | — | Disco broker port |
-| `EM_FILTER_JWT_TOKEN` | — | JWT for authenticated brokers |
-| `EM_FILTER_RECONNECT_MS` | `5000` | Reconnect delay in milliseconds |
+| `EM_FILTER_MODE` | `relay` | `relay` \| `direct` \| `both` |
+| `EM_DISCO_HOST` | — | Disco node hostname |
+| `EM_DISCO_PORT` | — | Disco node port |
+| `EM_FILTER_KEY_DIR` | `./empop_key_<name>/` | ed25519 key file directory |
+| `EM_FILTER_RECONNECT_MS` | `5000` | Relay reconnect delay in milliseconds |
+| `EM_FILTER_QUERY_PORT` | `9600` | Model A (`direct`) HTTP listen port |
+| `EM_FILTER_ADVERTISE_HOST` | `0.0.0.0` | Model A host advertised in gossip payloads |
+| `EM_FILTER_GOSSIP_INTERVAL_S` | `5` | Model A gossip push interval (seconds) |
 
 ### Node resolution order
 
@@ -258,8 +251,8 @@ Default: `["search", "query"]`. Override to add domain-specific capabilities.
 | Host | Port | Transport |
 |------|------|-----------|
 | `localhost`, `127.0.0.1`, `::1` | any | `ws://` (plain) |
-| any other | 443 | `wss://` (TLS) |
-| any other | other | `ws://` (plain) |
+| any other | 443, or unspecified | `wss://` (TLS) |
+| any other | other explicit port | `ws://` (plain) |
 
 ### emergence.conf
 
@@ -278,32 +271,36 @@ Platform paths:
 use em_filter::{AgentConfig, DiscoNode};
 
 let config = AgentConfig {
-    jwt_token: Some("eyJ...".into()),
+    jwt_token: None,
     disco_nodes: vec![
-        DiscoNode { host: "disco.example.com".into(), port: 443, tls: true },
-        DiscoNode { host: "disco2.example.com".into(), port: 443, tls: true },
+        DiscoNode { host: "disco.roques.me".into(), port: 443, tls: true },
     ],
 };
 ```
 
 ---
 
-## Multi-node
+## Multi-node and `both` mode
 
-`FilterRunner` connects to all resolved nodes simultaneously. Each node gets its
-own tokio task; the filter is shared via `Arc<Mutex<F>>`. All handler calls are
-serialized — one query at a time — regardless of how many nodes are connected.
+In `relay` mode, `FilterRunner` connects to the first resolved disco node. In
+`direct` mode, the gossip pusher advertises the agent's identity to every
+resolved node (`AgentConfig::disco_nodes`, or `EM_DISCO_HOST`/`EM_DISCO_PORT`,
+or `emergence.conf`). `EM_FILTER_MODE=both` runs the relay WebSocket and the
+direct HTTP server + gossip pusher concurrently, under the same identity:
 
 ```rust
+use em_filter::{AgentConfig, DiscoNode, FilterRunner};
+
 let config = AgentConfig {
     disco_nodes: vec![
-        DiscoNode { host: "disco-eu.example.com".into(), port: 443, tls: true },
-        DiscoNode { host: "disco-us.example.com".into(), port: 443, tls: true },
+        DiscoNode { host: "disco.roques.me".into(), port: 443, tls: true },
     ],
     ..AgentConfig::default()
 };
 
+// or set EM_FILTER_MODE=both in the environment
 FilterRunner::new("my_filter", MyFilter, config)
+    .with_mode("both")
     .run()
     .await
     .unwrap();
@@ -347,26 +344,32 @@ let skip = should_skip_link("https://ads.example.com", &["ads.example.com"]);
 
 ---
 
-## WebSocket protocol
+## Wire protocol
 
-The agent speaks a minimal JSON-over-WebSocket protocol to em_disco.
+Every result is signed with the agent's ed25519 key (see `em_filter::crypto`), so
+the disco (and Emquest, downstream) can verify it came from the identity it
+gossip-bound, without trusting the transport.
 
-**Agent → Disco:**
+**Model B — relay (agent ↔ disco, WebSocket to `/ws/filter`):**
 ```json
-{ "action": "register",    "name": "<agent_name>" }
-{ "action": "agent_hello", "capabilities": ["search", "query", "web"] }
-{ "action": "result",      "id": "<query_id>", "data": <result> }
+{ "action": "hello",    "name": "<agent_name>", "pubkey": "<b64>", "sig": "<b64>", "capabilities": ["search", "query", "web"] }
+{ "action": "hello_ok", "id": "<b64>" }
+{ "action": "query",    "id": "<query_id>", "body": "<query_string>" }
+{ "action": "result",   "id": "<query_id>", "results": [...], "signer_id": "<b64>", "signature": "<b64>" }
 ```
 
-**Disco → Agent:**
-```json
-{ "status": "ok", "action": "registered" }
-{ "status": "ok", "action": "agent_registered", "capabilities": [...] }
-{ "action": "query", "id": "<query_id>", "body": "<query_string>" }
+**Model A — direct (agent serves HTTP):**
+```text
+POST /agent/query   { "query": "<query_string>" }
+                  -> { "results": [...], "signer_id": "<b64>", "signature": "<b64>" }
+POST /pop/gossip     <remote self-payload>
+                  -> { "id": "<b64>", "name": "...", "host": "...", "query_port": N,
+                        "pubkey": "<b64>", "sig": "<b64>", "capabilities": [...], "role": "filter" }
+GET  /health      -> "ok"
 ```
 
-The library handles the handshake and reconnection automatically. Your code only
-implements `Filter::handle`.
+The library handles the handshake, signing, and reconnection automatically. Your
+code only implements `Filter::handle`.
 
 ---
 
@@ -385,7 +388,7 @@ tracing_subscriber::fmt::init();
 ```
 
 Log levels:
-- `INFO` — connection lifecycle (connected, disconnected, registered)
+- `INFO` — connection lifecycle (connecting, `hello_ok`, disconnected)
 - `WARN` — connection errors, malformed frames, query ID issues
 - `ERROR` — task panics
 
