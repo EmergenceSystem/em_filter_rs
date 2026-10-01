@@ -72,7 +72,9 @@ async fn test_filterrunner_relay_handshake_and_query_dispatch() {
 
         // Receive the signed result.
         let msg = read.next().await.unwrap().unwrap();
-        let result: Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        let mut result: Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+        // Hand the hello pubkey to the test so it can verify the signature.
+        result["_pubkey"] = v["pubkey"].clone();
         let _ = result_tx.send(result);
     });
 
@@ -106,7 +108,7 @@ async fn test_filterrunner_relay_handshake_and_query_dispatch() {
     assert_eq!(result["action"], "result");
     assert_eq!(result["id"], "int-1");
     assert!(result["signer_id"].as_str().is_some());
-    assert!(result["signature"].as_str().is_some());
+    assert_v2_signature(&result, "hello world");
     assert_eq!(
         result["results"][0]["properties"]["title"],
         "0:hello world"
@@ -130,6 +132,7 @@ async fn test_agent_server_signs_query_results() {
     let identity = Arc::new(
         Identity::new("direct_agent", &key_dir, vec!["search".into()]).unwrap(),
     );
+    let pubkey = identity.pubkey;
     let count = Arc::new(AtomicUsize::new(0));
     let filter = Arc::new(Mutex::new(CountFilter { count: count.clone() }));
 
@@ -149,10 +152,24 @@ async fn test_agent_server_signs_query_results() {
 
     let v: Value = serde_json::from_str(&body).expect("valid JSON response");
     assert!(v["signer_id"].as_str().is_some());
-    assert!(v["signature"].as_str().is_some());
+    let mut v = v;
+    v["_pubkey"] = json!(em_filter::crypto::base64_encode(&pubkey));
+    assert_v2_signature(&v, "erlang");
     assert_eq!(v["results"][0]["properties"]["title"], "0:erlang");
 
     let _ = std::fs::remove_dir_all(&key_dir);
+}
+
+/// Assert `resp` carries a `ts` and a v2 signature over `(query, ts, results)`
+/// that verifies under `resp["_pubkey"]` (base64, injected by the test).
+fn assert_v2_signature(resp: &Value, query: &str) {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let ts = resp["ts"].as_i64().expect("response carries ts");
+    assert!(ts > 0);
+    let pubkey = STANDARD.decode(resp["_pubkey"].as_str().unwrap()).unwrap();
+    let sig = STANDARD.decode(resp["signature"].as_str().unwrap()).unwrap();
+    let canon = em_filter::crypto::canonical_response_v2(query, ts, &resp["results"]);
+    assert!(em_filter::crypto::verify(&canon, &sig, &pubkey), "v2 signature must verify");
 }
 
 /// Minimal blocking HTTP/1.1 POST used only to exercise `AgentServer` in tests.
@@ -175,4 +192,72 @@ fn http_post(port: u16, path: &str, body: &str) -> String {
     let mut raw = String::new();
     stream.read_to_string(&mut raw).unwrap();
     raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string()
+}
+
+#[test]
+fn test_gossip_pusher_sends_signed_headers() {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use em_filter::{GossipPusher, Identity};
+    use std::io::Read;
+
+    let key_dir = std::env::temp_dir().join(format!("em_filter_rs_it_gossip_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&key_dir);
+    let identity = Arc::new(Identity::new("gossip_agent", &key_dir, vec![]).unwrap());
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let pusher = GossipPusher::new(
+        identity.clone(),
+        vec![("127.0.0.1".into(), port)],
+        "127.0.0.1",
+        9600,
+        Duration::from_millis(200),
+    )
+    .start();
+
+    let (mut stream, _) = listener.accept().unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut raw = Vec::new();
+    let mut buf = [0u8; 4096];
+    // Read until headers + full body (Content-Length) are in.
+    loop {
+        let n = stream.read(&mut buf).unwrap();
+        raw.extend_from_slice(&buf[..n]);
+        let text = String::from_utf8_lossy(&raw).to_string();
+        if let Some(idx) = text.find("\r\n\r\n") {
+            let len: usize = text[..idx]
+                .lines()
+                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap()))
+                .unwrap();
+            if raw.len() >= idx + 4 + len {
+                break;
+            }
+        }
+        if n == 0 {
+            break;
+        }
+    }
+    drop(stream);
+    pusher.stop();
+
+    let text = String::from_utf8(raw).unwrap();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap();
+    let header = |name: &str| -> String {
+        head.lines()
+            .find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                k.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
+            })
+            .unwrap_or_else(|| panic!("missing header {name}"))
+    };
+
+    assert_eq!(header("x-pop-id"), em_filter::crypto::base64_encode(&identity.id));
+    let ts: i64 = header("x-pop-ts").parse().unwrap();
+    let sig = STANDARD.decode(header("x-pop-sig")).unwrap();
+    let hash = <sha2::Sha256 as sha2::Digest>::digest(body.as_bytes());
+    let canon = em_filter::crypto::canonical_gossip_auth(&identity.id, ts, &hash);
+    assert!(em_filter::crypto::verify(&canon, &sig, &identity.pubkey));
+
+    let _ = std::fs::remove_dir_all(&key_dir);
 }

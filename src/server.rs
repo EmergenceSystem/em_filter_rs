@@ -90,16 +90,19 @@ impl<F: Filter> AgentServer<F> {
                     };
 
                     let filter = Arc::clone(&self.filter);
+                    let handler_query = query.clone();
                     let outcome = rt.block_on(async move {
                         let mut f = filter.lock().await;
-                        f.handle(&query).await
+                        f.handle(&handler_query).await
                     });
 
                     match outcome {
                         Ok(items) => {
-                            let (signer_id, signature) = self.identity.sign_results(&items);
+                            let (ts, signer_id, signature) =
+                                self.identity.sign_results_v2(&query, &items);
                             let body = json!({
                                 "results": items,
+                                "ts": ts,
                                 "signer_id": signer_id,
                                 "signature": signature,
                             });
@@ -168,8 +171,9 @@ impl GossipPusher {
             .identity
             .gossip_payload(&self.host, self.query_port)
             .to_string();
+        let headers = self.identity.gossip_headers(payload.as_bytes());
         for (host, port) in &self.seeds {
-            if let Err(e) = http_post_json(host, *port, "/pop/gossip", &payload) {
+            if let Err(e) = http_post_json(host, *port, "/pop/gossip", &payload, &headers) {
                 tracing::warn!(seed = %format!("{host}:{port}"), error = %e, "gossip push failed");
             }
         }
@@ -207,20 +211,32 @@ impl GossipPusherHandle {
 /// A minimal hand-rolled HTTP/1.1 POST — no external HTTP client dependency,
 /// matching the Python reference (`urllib.request`), which likewise performs
 /// a plain (non-TLS) POST regardless of the target node's own TLS flag.
-fn http_post_json(host: &str, port: u16, path: &str, body: &str) -> std::io::Result<()> {
+fn http_post_json(
+    host: &str,
+    port: u16,
+    path: &str,
+    body: &str,
+    extra_headers: &[(String, String)],
+) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((host, port))?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
+    let extra: String = extra_headers
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}\r\n"))
+        .collect();
     let request = format!(
         "POST {path} HTTP/1.1\r\n\
          Host: {host}\r\n\
          Content-Type: application/json\r\n\
+         {extra}\
          Content-Length: {len}\r\n\
          Connection: close\r\n\r\n\
          {body}",
         path = path,
         host = host,
+        extra = extra,
         len = body.len(),
         body = body,
     );

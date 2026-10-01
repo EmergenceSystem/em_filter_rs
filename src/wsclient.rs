@@ -100,7 +100,8 @@ impl<F: Filter> RelayClient<F> {
                         tracing::warn!(agent = %self.identity.name, "query frame missing 'id', skipping");
                         continue;
                     };
-                    let body = v["body"].as_str().unwrap_or("").trim().to_string();
+                    let raw_body = v["body"].as_str().unwrap_or("").to_string();
+                    let body = raw_body.trim().to_string();
 
                     tracing::info!(agent = %self.identity.name, query_id = %id, body = %body, "handling query");
 
@@ -120,13 +121,16 @@ impl<F: Filter> RelayClient<F> {
                         }
                     };
 
-                    let (signer_id, signature) = self.identity.sign_results(&items);
+                    // Sign over the raw relayed body (what the relay will verify against).
+                    let (ts, signer_id, signature) =
+                        self.identity.sign_results_v2(&raw_body, &items);
                     write
                         .send(Message::Text(
                             json!({
                                 "action": "result",
                                 "id": id,
                                 "results": items,
+                                "ts": ts,
                                 "signer_id": signer_id,
                                 "signature": signature,
                             })
