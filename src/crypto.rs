@@ -113,6 +113,65 @@ pub fn sign(msg: &[u8], seed: &[u8]) -> [u8; 64] {
     signing_key.sign(msg).to_bytes()
 }
 
+/// Build the v2 canonical "response" byte form, binding the response to the
+/// query and a timestamp (replay protection):
+/// `utf8(query) ‖ 0x00 ‖ ascii(decimal(ts)) ‖ 0x00 ‖ canonical_response(items)`.
+///
+/// `ts` is a unix timestamp in milliseconds, rendered in base-10 ASCII.
+pub fn canonical_response_v2(query: &str, ts: i64, items: &serde_json::Value) -> Vec<u8> {
+    let ts_str = ts.to_string();
+    let body = canonical_response(items);
+    let mut out = Vec::with_capacity(query.len() + 1 + ts_str.len() + 1 + body.len());
+    out.extend_from_slice(query.as_bytes());
+    out.push(0x00);
+    out.extend_from_slice(ts_str.as_bytes());
+    out.push(0x00);
+    out.extend_from_slice(&body);
+    out
+}
+
+/// Sign a v2 response. Returns `(signer_id_b64, signature_b64)` where
+/// `signer_id_b64 = base64(id_of(pubkey))` and
+/// `signature_b64 = base64(Ed25519_sign(canonical_response_v2(query, ts, items), seed))`.
+///
+/// # Panics
+/// Panics if `seed` is not exactly 32 bytes long.
+pub fn sign_response_v2(
+    query: &str,
+    ts: i64,
+    items: &serde_json::Value,
+    pubkey: &[u8],
+    seed: &[u8],
+) -> (String, String) {
+    let sig = sign(&canonical_response_v2(query, ts, items), seed);
+    (base64_encode(&id_of(pubkey)), base64_encode(&sig))
+}
+
+/// Build the canonical "gossip auth" byte form:
+/// `id ‖ 0x00 ‖ ascii(decimal(ts)) ‖ 0x00 ‖ body_sha256`, where `body_sha256`
+/// is the raw 32-byte SHA-256 digest of the request body.
+pub fn canonical_gossip_auth(id: &[u8], ts: i64, body_sha256: &[u8]) -> Vec<u8> {
+    let ts_str = ts.to_string();
+    let mut out = Vec::with_capacity(id.len() + 1 + ts_str.len() + 1 + body_sha256.len());
+    out.extend_from_slice(id);
+    out.push(0x00);
+    out.extend_from_slice(ts_str.as_bytes());
+    out.push(0x00);
+    out.extend_from_slice(body_sha256);
+    out
+}
+
+/// Sign a gossip request. Returns
+/// `base64(Ed25519_sign(canonical_gossip_auth(id, ts, SHA-256(body)), seed))`.
+///
+/// # Panics
+/// Panics if `seed` is not exactly 32 bytes long.
+pub fn sign_gossip(id: &[u8], ts: i64, body: &[u8], seed: &[u8]) -> String {
+    let body_hash = Sha256::digest(body);
+    let sig = sign(&canonical_gossip_auth(id, ts, &body_hash), seed);
+    base64_encode(&sig)
+}
+
 /// Verify `sig` against `msg` under `pubkey`. Never panics — returns `false`
 /// for malformed input (wrong-length key/signature) or a failed verification.
 pub fn verify(msg: &[u8], sig: &[u8], pubkey: &[u8]) -> bool {
